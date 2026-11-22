@@ -12,6 +12,7 @@ class Camera {
     this.onvifPort = 8000,
     this.onvifUser = 'admin',
     this.onvifPassword = '',
+    this.mac = '',
   });
 
   final String id;
@@ -29,6 +30,12 @@ class Camera {
   final String onvifUser;
   final String onvifPassword;
 
+  /// The camera's network hardware (MAC) address, learned over ONVIF. It
+  /// identifies the camera itself, whatever IP address the router gives it
+  /// (CP Plus cameras all report the same serial number, so that can't).
+  /// Empty until first learned.
+  final String mac;
+
   bool get hasOnvif => onvifPassword.isNotEmpty;
   bool get hasStreams => mainUrl.isNotEmpty;
 
@@ -41,6 +48,7 @@ class Camera {
     int? onvifPort,
     String? onvifUser,
     String? onvifPassword,
+    String? mac,
   }) => Camera(
     id: id,
     name: name ?? this.name,
@@ -51,6 +59,7 @@ class Camera {
     onvifPort: onvifPort ?? this.onvifPort,
     onvifUser: onvifUser ?? this.onvifUser,
     onvifPassword: onvifPassword ?? this.onvifPassword,
+    mac: mac ?? this.mac,
   );
 
   Map<String, dynamic> toJson() => {
@@ -63,6 +72,7 @@ class Camera {
     'onvifPort': onvifPort,
     'onvifUser': onvifUser,
     'onvifPassword': onvifPassword,
+    'mac': mac,
   };
 
   factory Camera.fromJson(Map<String, dynamic> j) => Camera(
@@ -75,6 +85,7 @@ class Camera {
     onvifPort: (j['onvifPort'] as int?) ?? 8000,
     onvifUser: (j['onvifUser'] as String?) ?? 'admin',
     onvifPassword: (j['onvifPassword'] as String?) ?? '',
+    mac: (j['mac'] as String?) ?? '',
   );
 
   static String encodeList(List<Camera> cams) => jsonEncode(cams.map((c) => c.toJson()).toList());

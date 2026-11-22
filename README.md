@@ -86,9 +86,17 @@ Diagnostics: build with `--dart-define=PEHRA_LOG=true` and run
   UDP, and remembers what works. The full-screen view reuses the grid's
   connection, so moving between screens doesn't reconnect. If a stream
   drops, the last picture stays up while it reconnects.
+- **Camera identity:** routers can hand cameras new addresses (for example
+  after a power cut), and some CP Plus firmware reports a stale address in
+  its stream links. NetSeye identifies each camera by its network hardware
+  (MAC) address over ONVIF, finds moved cameras on the local network
+  (WS-Discovery, then a quick scan), and always plays from the address the
+  camera actually answered on, so a camera can never show another camera's
+  picture. A DHCP reservation for each camera in your router still helps.
 - **TV:** cameras open in Light quality because many cameras' HD (above
   1080p) is beyond typical TV video decoders. HD is still available and
-  falls back to Light if the TV can't play it.
+  falls back to Light if the TV can't play it. While the camera grid is on
+  screen, the TV is kept awake so it works as an always-on monitor.
 
 Code layout: `lib/app` (theme, motion, routes) · `lib/data` (camera list,
 validation) · `lib/services` (playback, ONVIF, network) · `lib/features`

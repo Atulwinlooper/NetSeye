@@ -48,8 +48,15 @@ Only the latest release receives security fixes.
   guests on a separate guest network.
 - **Local RTSP relay.** For compatibility, the app runs a small relay bound
   to `127.0.0.1` (never reachable from the network) while a camera is open.
-  It forwards to that one camera only, rejects oversized messages, and stops
-  when the stream closes.
+  It forwards to that one camera only, rejects oversized messages, gives up
+  on a camera that stops answering, and stops when the stream closes.
+- **Finding moved cameras.** When a saved camera no longer answers at its
+  address, the app looks for it on the local network: an ONVIF WS-Discovery
+  multicast probe, then a short connection check of the ONVIF port (8000)
+  across the device's own private /24 subnet. Only private addresses are
+  ever scanned. A camera is accepted only if its hardware (MAC) address
+  matches the one saved for it, so another device can't take over a
+  camera's slot by taking its IP address.
 - **Sideloaded APKs.** Install NetSeye only from this repository's releases or
   from your own build, and keep your signing key private: updates must be
   signed with the same key.

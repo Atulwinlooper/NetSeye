@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/widgets.dart';
 
 import '../../data/camera_store.dart';
@@ -15,11 +17,45 @@ class FeedPool extends ChangeNotifier {
       onShow: () {
         _sync();
         store.discoverMissingStreams();
+        unawaited(store.verifyLocations());
       },
     );
-    _sync();
+    if (connect) {
+      // Before showing any video, check each address still belongs to the
+      // same camera (routers reshuffle addresses). Capped at 3 s so a
+      // camera that's off doesn't hold up the others.
+      unawaited(
+        Future.any([store.verifyLocations(force: true), Future<void>.delayed(const Duration(seconds: 3))])
+            .whenComplete(() {
+              _started = true;
+              _sync();
+            }),
+      );
+      // Cheap re-check now and then (one small request per camera), so a
+      // reshuffle while the app runs for days is caught too.
+      _recheck = Timer.periodic(const Duration(minutes: 5), (_) => store.verifyLocations());
+      if (_churnSeconds > 0) {
+        _churn = Timer.periodic(const Duration(seconds: _churnSeconds), (_) {
+          for (final f in _feeds.values) {
+            f.reconnect();
+          }
+        });
+      }
+    } else {
+      _started = true;
+      _sync();
+    }
     store.discoverMissingStreams();
   }
+
+  bool _started = false;
+  Timer? _recheck;
+
+  /// Test builds only (--dart-define=PEHRA_CHURN=N, in seconds): reconnect every
+  /// camera on a timer, to compress days of real-world reconnects into
+  /// minutes when hunting slow leaks.
+  static const _churnSeconds = int.fromEnvironment('PEHRA_CHURN');
+  Timer? _churn;
 
   final CameraStore store;
 
@@ -47,11 +83,14 @@ class FeedPool extends ChangeNotifier {
       }
     }
     health.value = CameraHealth(live, store.cameras.length - live - offline, offline);
+    // A camera that can't be reached may simply have a new address.
+    if (offline > 0 && connect) unawaited(store.verifyLocations());
   }
 
   LiveFeed _watch(LiveFeed f) => f..addListener(_recount);
 
   void _sync() {
+    if (!_started) return;
     _hidden = false;
     if (!connect) return _recount();
     final wanted = <String>{};
@@ -89,6 +128,7 @@ class FeedPool extends ChangeNotifier {
   }
 
   void reconnectAll() {
+    unawaited(store.verifyLocations(force: true));
     store.discoverMissingStreams();
     for (final f in _feeds.values) {
       f.reconnect();
@@ -99,6 +139,8 @@ class FeedPool extends ChangeNotifier {
   void dispose() {
     store.removeListener(_sync);
     _lifecycle.dispose();
+    _recheck?.cancel();
+    _churn?.cancel();
     for (final f in _feeds.values) {
       f.dispose();
     }

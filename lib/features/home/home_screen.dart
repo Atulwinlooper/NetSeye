@@ -16,6 +16,7 @@ import 'camera_tile.dart';
 import 'feed_pool.dart';
 import 'password_gate.dart';
 import '../../services/device.dart';
+import '../../services/screen_awake.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.store, this.connect = true});
@@ -29,8 +30,19 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   late final FeedPool _pool = FeedPool(widget.store, connect: widget.connect);
 
+  /// A TV showing the camera grid is a monitor: keep its screen on, or it
+  /// falls asleep after the idle timeout and the app gets closed.
+  late final bool _keepAwake = widget.connect && Device.isTv;
+
+  @override
+  void initState() {
+    super.initState();
+    if (_keepAwake) ScreenAwake.hold();
+  }
+
   @override
   void dispose() {
+    if (_keepAwake) ScreenAwake.release();
     _pool.dispose();
     super.dispose();
   }

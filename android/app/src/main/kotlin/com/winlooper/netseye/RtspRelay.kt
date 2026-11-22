@@ -4,6 +4,7 @@ import java.io.BufferedInputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.URI
@@ -49,7 +50,14 @@ class RtspRelay(cameraUrl: String) {
         var upstream: Socket? = null
         try {
             if (closed) return
-            upstream = Socket(camera.host, if (camera.port > 0) camera.port else 554).apply { tcpNoDelay = true }
+            // Time limits, so a camera that vanishes (Wi-Fi drop, power cut)
+            // can't leave this connection's threads and sockets waiting
+            // forever. A live camera sends video many times a second.
+            upstream = Socket().apply {
+                tcpNoDelay = true
+                soTimeout = READ_TIMEOUT_MS
+                connect(InetSocketAddress(camera.host, if (camera.port > 0) camera.port else 554), CONNECT_TIMEOUT_MS)
+            }
             client.tcpNoDelay = true
             synchronized(sockets) { sockets += client; sockets += upstream }
             if (closed) return
@@ -77,6 +85,7 @@ class RtspRelay(cameraUrl: String) {
         } finally {
             runCatching { client.close() }
             runCatching { upstream?.close() }
+            synchronized(sockets) { sockets.remove(client); upstream?.let { sockets.remove(it) } }
         }
     }
 
@@ -233,6 +242,8 @@ class RtspRelay(cameraUrl: String) {
 
     companion object {
         private const val MAX_BODY = 64 * 1024
+        private const val CONNECT_TIMEOUT_MS = 5000
+        private const val READ_TIMEOUT_MS = 15000
 
         /** Normalises line endings and mismatched audio payload numbers. */
         fun fixSdp(sdp: String): String {

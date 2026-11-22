@@ -166,7 +166,14 @@ class ExoStreams(
         player.prepare()
         val first = streams.isEmpty()
         streams[id] = Stream(player, producer, relay)
-        if (first) main.postDelayed(tick, 700)
+        if (first) {
+            // The heartbeat stops itself when the last stream goes. If one is
+            // still queued, drop it first: otherwise every empty-then-new
+            // moment (reconnecting all cameras) would start another loop, and
+            // over days they pile up into a busy main thread.
+            main.removeCallbacks(tick)
+            main.postDelayed(tick, 700)
+        }
         return id
     }
 

@@ -68,6 +68,9 @@ class _CameraEditorState extends State<CameraEditor> {
     onvifPort: _orig?.onvifPort ?? 8000,
     onvifUser: _user.text.trim(),
     onvifPassword: _pass.text,
+    // Same address: still the same camera. A new address the user typed:
+    // learn which camera is there afresh.
+    mac: _orig != null && _orig.host == _host.text.trim() ? _orig.mac : '',
   );
 
   void _say(String text, {bool error = false}) => setState(() {

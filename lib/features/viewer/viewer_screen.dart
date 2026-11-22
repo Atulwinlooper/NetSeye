@@ -2,7 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
+
+import '../../services/screen_awake.dart';
 
 import '../../app/theme.dart';
 import '../../data/camera_store.dart';
@@ -58,7 +59,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
   @override
   void initState() {
     super.initState();
-    WakelockPlus.enable();
+    ScreenAwake.hold();
     _zoom.addListener(() {
       final s = _zoom.value.getMaxScaleOnAxis();
       if ((s - _scale).abs() > 0.01) setState(() => _scale = s);
@@ -70,7 +71,7 @@ class _ViewerScreenState extends State<ViewerScreen> {
   void dispose() {
     _hideTimer?.cancel();
     _driver?.stop();
-    WakelockPlus.disable();
+    ScreenAwake.release();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _pages.dispose();
     _zoom.dispose();

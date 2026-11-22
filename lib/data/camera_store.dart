@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -144,6 +146,120 @@ class CameraStore extends ChangeNotifier {
 
   bool _discovering = false;
 
+  // Camera identity ------------------------------------------------------
+
+  bool _locating = false;
+  DateTime _lastLocate = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Make sure every camera address still points at that same camera.
+  ///
+  /// Routers hand out new addresses after a restart, and cameras can swap
+  /// addresses: the app would then show one camera's video under another's
+  /// name, or nothing. Each camera's hardware (MAC) address identifies it;
+  /// this checks the device at each saved address, and for any camera that
+  /// moved, searches the network and updates its address and stream links.
+  ///
+  /// [force] skips the throttle (manual refresh). Returns the names of
+  /// cameras that moved.
+  Future<List<String>> verifyLocations({
+    bool force = false,
+    OnvifClient Function(Camera) client = OnvifClient.new,
+    Future<Set<String>> Function() findDevices = OnvifClient.findDevices,
+  }) async {
+    if (_locating) return const [];
+    if (!force && DateTime.now().difference(_lastLocate) < const Duration(minutes: 2)) return const [];
+    _locating = true;
+    _lastLocate = DateTime.now();
+    final moved = <String>[];
+    try {
+      final cams = _cameras.where((c) => c.hasOnvif).toList();
+      if (cams.isEmpty) return moved;
+
+      // 1. Ask each saved address who it is.
+      final atHost = <String, String?>{};
+      await Future.wait([
+        for (final c in cams) _ask(client(c), (o) => o.mac()).then((m) => atHost[c.host] = m),
+      ]);
+
+      final lost = <Camera>[];
+      for (final c in cams) {
+        final seen = atHost[c.host];
+        if (c.mac.isEmpty) {
+          // First time: learn who this camera is (only if no other camera
+          // already claims that hardware).
+          if (seen != null && !_cameras.any((o) => o.id != c.id && o.mac == seen)) {
+            await _replace(c.copyWith(mac: seen));
+          }
+        } else if (seen != c.mac) {
+          lost.add(c); // unreachable, or a different camera answers there
+        }
+      }
+      if (lost.isEmpty) return moved;
+
+      // A camera whose address now belongs to another camera must not keep
+      // playing it under the wrong name: drop its links until it's found.
+      for (final c in lost) {
+        final current = byId(c.id);
+        if (current != null && atHost[c.host] != null) {
+          await _replace(current.copyWith(mainUrl: '', subUrl: ''));
+        }
+      }
+
+      // 2. Search the network and match hardware addresses.
+      final macToHost = <String, String>{
+        for (final e in atHost.entries)
+          if (e.value != null) e.value!: e.key,
+      };
+      final wanted = {for (final c in lost) c.mac};
+      if (!wanted.every(macToHost.containsKey)) {
+        final hosts = await findDevices();
+        final probe = lost.first;
+        await Future.wait([
+          for (final h in hosts.where((h) => !macToHost.containsValue(h)))
+            _ask(client(probe.copyWith(host: h)), (o) => o.mac()).then((m) {
+              if (m != null) macToHost[m] = h;
+            }),
+        ]);
+      }
+
+      // 3. Move each lost camera to where its hardware now answers.
+      for (final c in lost) {
+        final newHost = macToHost[c.mac];
+        final current = byId(c.id);
+        if (newHost == null || current == null) continue;
+        var updated = current.copyWith(host: newHost, mainUrl: '', subUrl: '');
+        try {
+          final (hd, light) = await _ask(client(updated), (o) => o.discoverStreams());
+          if (hd != null) updated = updated.copyWith(mainUrl: hd, subUrl: light ?? hd);
+        } on Exception {
+          // Found but not answering stream requests yet; links are fetched
+          // again by discoverMissingStreams.
+        }
+        await _replace(updated);
+        moved.add(current.name);
+      }
+    } finally {
+      _locating = false;
+    }
+    return moved;
+  }
+
+  /// Run one request on a throwaway client, then free its connections.
+  static Future<T> _ask<T>(OnvifClient c, Future<T> Function(OnvifClient) f) async {
+    try {
+      return await f(c);
+    } finally {
+      c.close();
+    }
+  }
+
+  Future<void> _replace(Camera cam) async {
+    final i = _cameras.indexWhere((c) => c.id == cam.id);
+    if (i == -1) return;
+    _cameras = [..._cameras]..[i] = cam;
+    await _save();
+  }
+
   /// First run on a device: cameras are known but the camera password
   /// isn't (it is never shipped inside the app).
   bool get needsPassword => _cameras.isNotEmpty && _cameras.every((c) => !c.hasOnvif);
@@ -158,7 +274,10 @@ class CameraStore extends ChangeNotifier {
     final found = <String, (String, String)>{};
     for (final cam in pending) {
       try {
-        final (hd, light) = await OnvifClient(cam.copyWith(onvifPassword: password)).discoverStreams();
+        final (hd, light) = await _ask(
+          OnvifClient(cam.copyWith(onvifPassword: password)),
+          (o) => o.discoverStreams(),
+        );
         if (hd != null) found[cam.id] = (hd, light ?? hd);
       } on Exception {
         // wrong password or offline; decided below
@@ -178,6 +297,8 @@ class CameraStore extends ChangeNotifier {
     ];
     await _save();
     notifyListeners();
+    // Learn each camera's hardware address now, while it's known good.
+    unawaited(verifyLocations(force: true));
     return true;
   }
 
